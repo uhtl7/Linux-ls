@@ -3,10 +3,81 @@
 #include<sys/stat.h>//stat()
 #include<stdlib.h>//getenv()
 #include<string.h>
+#include<unistd.h>//getopt()
 typedef struct{
-    char d_name[256];
     struct stat st;
 }Entry;
+typedef struct{
+    int a;
+    int l;
+    int R;
+    int r;
+    int i;
+    int t;
+    int s;
+}Input;
+int get_input(int argc,char *const argv[],Input*input)
+{
+    int ch=0;
+    while((ch=getopt(argc,argv,"alRrits"))!=-1)
+    {
+       switch(ch)
+       {
+            case 'a':
+                input->a=1;
+                break;
+            case 'l':
+                input->l=1;
+                break;
+            case 'R':
+                input->R=1;
+                break;
+            case 'r':
+                input->r=1;
+                break;
+            case 'i':
+                input->i=1;
+                break;
+            case 't':
+                input->t=1;
+                break;
+            case 's':
+                input->s=1;
+                break;
+            //default     
+       }
+    }
+    return 1;//?????;
+}
+// void get_file(char *path,struct stat *st)
+// {
+//     lstat(path,st);
+// } 
+void list_file(char *path,Input *input)
+{
+    DIR*dir;
+    dir=opendir(path);
+    if(dir==NULL)
+    {
+        perror("opendir");
+        return;
+    }
+    struct dirent *dp;
+    struct stat st;
+    char fpath[4096];
+    while((dp=readdir(dir))!=NULL)
+    {
+        if(input->a==0 && dp->d_name[0]=='.')
+           continue;
+        snprintf(fpath,sizeof(fpath),"%s/%s", path, dp->d_name);
+        lstat(fpath,&st);
+        if(input->i)
+        printf("%d ",(int)st.st_ino);
+        if(input->s)
+        printf("%d ",(int)st.st_blocks);
+        printf("%s\n",dp->d_name);
+    }
+}
 int compare_name(const void*a,const void*b)
 {
     struct dirent* fp1=(struct dirent*)a;
@@ -23,59 +94,20 @@ int compare_time(const void*a,const void*b)
     return 1;
     return 0;
 }
-int main()
+int main(int argc,char*argv[])
 {
-    DIR *dir;
-    const char*home=getenv("HOME");
-    dir=opendir(home);//打开根目录
-    if(dir==NULL)
-    {
-        perror("opendir");
-        return 0;
-    }
-    struct dirent *readfile;
-    Entry*entry;
-    int n=0;
-    int cap=0;
-    char path[1024];
-    while((readfile=readdir(dir))!=NULL){//遍历目录内容
-        if(readfile->d_name[0]=='.')
-           continue;
-        if(n==cap){ 
-        cap=cap?cap*2:64;
-        entry=realloc(entry,cap*sizeof(Entry));
+   Input input={0};
+   int file_path=get_input(argc,argv,&input);
+   if(file_path==argc)
+   {
+        list_file(".",&input);
+   }
+   else
+   {
+        for(int i=file_path;i<argc;i++)
+        {
+            list_file(argv[i],&input);
         }
-        strncpy(entry[n].d_name,readfile->d_name,255);
-        entry[n].d_name[255]='\0'; 
-        snprintf(path,sizeof(path),"%s/%s",home,readfile->d_name);
-        stat(path,&entry[n].st);
-        n++;
-    }
-    closedir(dir);//关闭目录
-    qsort(entry,n,sizeof(Entry),compare_time);
-    for(int i=0;i<n;i++){
-        printf("%s ",entry[i].d_name);
-    }
-    free(entry);
-    printf("\n");
-    return 0;
-    // DIR *dir;
-    // const char*home=getenv("HOME");
-    // dir=opendir(home);
-    // if(dir==NULL)
-    // {
-    //     perror("opendir");
-    //     return 0;
-    // }
-    // struct dirent *readfile;
-    // struct stat st;
-    // while((readfile==readdir(dir))!=NULL)
-    // {
-    //     if(strcmp(readfile->d_name,'.')==0 || strcmp(readfile->d_name,'..')==0)
-    //     continue;  
-        
-        
-    // }
-    // closedir(dir);
-	// return 0;
+   }
+   return 0;
 }
