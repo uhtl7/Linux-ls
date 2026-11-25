@@ -2,11 +2,12 @@
 #include<dirent.h>//处理文件和目录信息,DIR,
 #include<sys/stat.h>//stat()
 #include<stdlib.h>//getenv()
-#include<string.h>
+#include<string.h>//strcoll()
 #include<unistd.h>//getopt()
 #include<pwd.h>//getpwuid
 #include<grp.h>//getpegid
 #include<time.h>
+#include<locale.h>//LC_COLLATE
 typedef struct{
     char file_name[256];
     struct stat st;
@@ -55,8 +56,8 @@ int get_input(int argc,char *const argv[],Input*input)
 }
 int compare_time(const void*a,const void*b)
 {
-    Entry*n=a;
-    Entry*m=b;
+    const Entry*n=a;
+    const Entry*m=b;
     if(n->st.st_mtime>m->st.st_mtime)
     return -1;
     if(n->st.st_mtime<m->st.st_mtime)
@@ -65,9 +66,9 @@ int compare_time(const void*a,const void*b)
 }
 int compare_name(const void*a,const void*b)
 {
-    struct dirent* fp1=(struct dirent*)a;
-    struct dirent* fp2=(struct dirent*)b;
-    return strcmp(fp1->d_name,fp2->d_name);
+    const Entry*n=a;
+    const Entry*m=b;
+    return strcoll(n->file_name,m->file_name);
 }
 // void get_file(char *path,struct stat *st)
 // {
@@ -79,30 +80,36 @@ void get_permission(mode_t mode,char perm[11])
     perm[1]=(mode & S_IRUSR) ? 'r' : '-';
     perm[2]=(mode & S_IWUSR) ? 'w' : '-';
     perm[3]=(mode & S_IXUSR) ? 'x' : '-';
-    perm[4]=(mode & S_IRUSR) ? 'r' : '-';
-    perm[5]=(mode & S_IWUSR) ? 'w' : '-';
-    perm[6]=(mode & S_IXUSR) ? 'x' : '-';
-    perm[7]=(mode & S_IRUSR) ? 'r' : '-';
-    perm[8]=(mode & S_IWUSR) ? 'w' : '-';
-    perm[9]=(mode & S_IXUSR) ? 'x' : '-';
+    perm[4]=(mode & S_IRGRP) ? 'r' : '-';
+    perm[5]=(mode & S_IWGRP) ? 'w' : '-';
+    perm[6]=(mode & S_IXGRP) ? 'x' : '-';
+    perm[7]=(mode & S_IROTH) ? 'r' : '-';
+    perm[8]=(mode & S_IWOTH) ? 'w' : '-';
+    perm[9]=(mode & S_IXOTH) ? 'x' : '-';
     perm[10]='\0';
 }
-char *get_uid(uid_t uid)
+char *get_uid(char uid_str[],int sz,uid_t uid)
 {
     struct passwd*pw=getpwuid(uid);
-    char uid_str[20];
-    snprintf(uid_str,sizeof(uid_str),"%u",uid);
+    snprintf(uid_str,sz,"%s",pw->pw_name);
     return uid_str;
 }
-char *get_gid(gid_t gid)
+char *get_gid(char gid_str[],int sz,gid_t gid)
 {
     struct group*gr=getgrgid(gid);
-    char gid_str[20];
-    snprintf(gid_str,sizeof(gid_str),"%u",gid);
+    snprintf(gid_str,sz,"%s",gr->gr_name);
     return gid_str;
+}
+char *get_time(char time_str[],int sz,time_t mtime)
+{
+    struct tm*tm=localtime(&mtime);
+    strftime(time_str,sz,"%b %d %H:%M",tm);
+    return time_str;
 }
 void list_file(char *path,Input *input)
 {
+    if(input->R)
+    printf("%s:\n",path);
     DIR*dir;
     dir=opendir(path);
     if(dir==NULL)
@@ -114,6 +121,9 @@ void list_file(char *path,Input *input)
     struct stat st;
     char fpath[4096];
     char perm[20];
+    char uid_str[20];
+    char gid_str[20];
+    char time_str[100];
     int n=0;
     int cap=0;
     Entry*entry=NULL;
@@ -127,7 +137,7 @@ void list_file(char *path,Input *input)
             entry=realloc(entry,sizeof(entry[0])*cap);
         }
         snprintf(entry[n].file_name,sizeof(entry[n].file_name),"%s",dp->d_name);   
-        snprintf(fpath,sizeof(fpath),"%s/%s", path, dp->d_name);
+        snprintf(fpath,sizeof(fpath),"%s/%s",path,dp->d_name);
         lstat(fpath,&entry[n].st);
         n++;
     }
@@ -136,16 +146,22 @@ void list_file(char *path,Input *input)
     qsort(entry,n,sizeof(entry[0]),compare_time);
     else
     qsort(entry,n,sizeof(entry[0]),compare_name);
+    if(input->r)
+    {
+        for(int i=0;i<n;i++)
+        {
+            int left=i;
+            int right=n-i-1;
+            if(left<right)
+            {
+                Entry t=entry[left];
+                entry[left]=entry[right];
+                entry[right]=t;
+            }
+        }
+    }
     for(int i=0;i<n;i++)
     {
-        int left=i;
-        int right=n-i-1;
-        if(input->r && left<right)
-        {
-            Entry t=entry[left];
-            entry[left]=entry[right];
-            entry[right]=t;
-        }
         if(input->i)
         printf("%d ",(int)entry[i].st.st_ino);
         if(input->s)
@@ -153,17 +169,35 @@ void list_file(char *path,Input *input)
         if(input->l)
         {
             get_permission(entry[i].st.st_mode,perm);
-            char*user=get_uid(entry[i].st.st_uid);
-            char*group=get_gid(entry[i].st.st_gid);
-            printf("%s %ld %s %s %ld ",perm,entry[i].st.st_nlink,user,group,entry[i].st.st_size);
+            char*user=get_uid(uid_str,sizeof(uid_str),entry[i].st.st_uid);
+            char*group=get_gid(gid_str,sizeof(gid_str),entry[i].st.st_gid);
+            char*time=get_time(time_str,sizeof(time_str),entry[i].st.st_mtime);
+            printf("%s %ld %s %s %ld %s ",perm,entry[i].st.st_nlink,user,group,entry[i].st.st_size,time);
         }
-        printf("%-*s",strlen(entry[i].file_name)+2,entry[i].file_name);
+        printf("%-*s",(int)strlen(entry[i].file_name)+2,entry[i].file_name);
+        if(input->l)
+        printf("\n");
+    }
+    printf("\n");
+    if(input->R)
+    {
+       for(int i=0;i<n;i++)
+       {
+        if(strcmp(entry[i].file_name,".")==0 || strcmp(entry[i].file_name,"..")==0)
+        continue;
+        if(!S_ISDIR(entry[i].st.st_mode))//判断是否为目录
+        continue;
+        char new_path[4096];
+        snprintf(new_path,sizeof(new_path),"%s/%s",path,entry[i].file_name);
+        printf(" %s ",new_path);
+        list_file(new_path,input);
+       }  
     }
     free(entry);
-    printf("\n");
 }
 int main(int argc,char*argv[])
 {
+   setlocale(LC_COLLATE, "");
    Input input={0};
    int file_path=get_input(argc,argv,&input);
    if(file_path==argc)
@@ -179,4 +213,4 @@ int main(int argc,char*argv[])
    }
    return 0;
 }
-//-l  -R
+//-R
