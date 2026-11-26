@@ -4,8 +4,8 @@
 #include<stdlib.h>//getenv()
 #include<string.h>//strcoll()
 #include<unistd.h>//getopt()
-#include<pwd.h>//getpwuid
-#include<grp.h>//getpegid
+#include<pwd.h>//getpwuid()
+#include<grp.h>//getpegid()
 #include<time.h>
 #include<locale.h>//LC_COLLATE
 typedef struct{
@@ -21,6 +21,16 @@ typedef struct{
     int t;
     int s;
 }Input;
+const char *get_color(struct stat *st)
+{
+   if(S_ISDIR(st->st_mode))
+   return "\033[1;34m";//蓝色(加粗)，目录
+   if(S_ISLNK(st->st_mode))
+   return "\033[1;36m";//青色(加粗)，连接
+   if((S_ISREG(st->st_mode) && (st->st_mode & 0111)))
+   return "\033[1;32m";//绿色(加粗)，可执行文件
+   return "\033[0m";//默认颜色
+}
 int get_input(int argc,char *const argv[],Input*input)
 {
     int ch=0;
@@ -70,10 +80,6 @@ int compare_name(const void*a,const void*b)
     const Entry*m=b;
     return strcoll(n->file_name,m->file_name);
 }
-// void get_file(char *path,struct stat *st)
-// {
-//     lstat(path,st);
-// }
 void get_permission(mode_t mode,char perm[11])
 {
     perm[0]=S_ISDIR(mode) ? 'd' : S_ISLNK(mode) ? 'l' : '-';
@@ -103,8 +109,64 @@ char *get_gid(char gid_str[],int sz,gid_t gid)
 char *get_time(char time_str[],int sz,time_t mtime)
 {
     struct tm*tm=localtime(&mtime);
-    strftime(time_str,sz,"%b %d %H:%M",tm);
+    strftime(time_str,sz,"%m月 %d %2H:%M",tm);
     return time_str;
+}
+void print(Entry*entry,int n,Input *input)
+{
+    if(n==0)
+    return;
+    if(input->l)
+        {
+            char perm[20];
+            char uid_str[20];
+            char gid_str[20];
+            char time_str[100];
+            for(int i=0;i<n;i++)
+            {
+                if(input->i)
+                printf("%d ",(int)entry[i].st.st_ino);
+                if(input->s)
+                printf("%d ",(int)entry[i].st.st_blocks);
+                get_permission(entry[i].st.st_mode,perm);
+                char*user=get_uid(uid_str,sizeof(uid_str),entry[i].st.st_uid);
+                char*group=get_gid(gid_str,sizeof(gid_str),entry[i].st.st_gid);
+                char*time=get_time(time_str,sizeof(time_str),entry[i].st.st_mtime);
+                printf("%-10s%2ld %-8s%-8s%6ld %s ",perm,entry[i].st.st_nlink,user,group,entry[i].st.st_size,time);
+                printf("%s%s%s\n",get_color(&entry[i].st),entry[i].file_name,"\033[0m");
+            }
+            return; 
+        }
+    int max_len=0;
+    for(int i=0;i<n;i++)
+    {
+        int len=strlen(entry[i].file_name);
+        if(len>max_len)
+        max_len=len;
+    }
+    int width=80;
+    int col_width=max_len+2;
+    int col=width/col_width;
+    if(col<1)
+    col=1;
+    if(col>n)
+    col=n;
+    int row=(n+col-1)/col;
+    for(int i=0;i<row;i++)
+    {
+        for(int j=0;j<col;j++)
+        {
+            int m=j*row+i;
+            if(m>=n)
+            continue;
+            if(input->i)
+            printf("%d ",(int)entry[m].st.st_ino);
+            if(input->s)
+            printf("%d ",(int)entry[m].st.st_blocks);
+            printf("%s%-*s%s",get_color(&entry[m].st),col_width,entry[m].file_name,"\033[0m");
+        }
+        printf("\n");
+    }
 }
 void list_file(char *path,Input *input)
 {
@@ -120,10 +182,10 @@ void list_file(char *path,Input *input)
     struct dirent *dp;
     struct stat st;
     char fpath[4096];
-    char perm[20];
-    char uid_str[20];
-    char gid_str[20];
-    char time_str[100];
+    // char perm[20];
+    // char uid_str[20];
+    // char gid_str[20];
+    // char time_str[100];
     int n=0;
     int cap=0;
     Entry*entry=NULL;
@@ -160,25 +222,22 @@ void list_file(char *path,Input *input)
             }
         }
     }
-    for(int i=0;i<n;i++)
-    {
-        if(input->i)
-        printf("%d ",(int)entry[i].st.st_ino);
-        if(input->s)
-        printf("%d ",(int)entry[i].st.st_blocks);
-        if(input->l)
-        {
-            get_permission(entry[i].st.st_mode,perm);
-            char*user=get_uid(uid_str,sizeof(uid_str),entry[i].st.st_uid);
-            char*group=get_gid(gid_str,sizeof(gid_str),entry[i].st.st_gid);
-            char*time=get_time(time_str,sizeof(time_str),entry[i].st.st_mtime);
-            printf("%s %ld %s %s %ld %s ",perm,entry[i].st.st_nlink,user,group,entry[i].st.st_size,time);
-        }
-        printf("%-*s",(int)strlen(entry[i].file_name)+2,entry[i].file_name);
-        if(input->l)
-        printf("\n");
-    }
-    printf("\n");
+    // for(int i=0;i<n;i++)
+    // {
+    //     if(input->i)
+    //     printf("%d ",(int)entry[i].st.st_ino);
+    //     if(input->s)
+    //     printf("%d ",(int)entry[i].st.st_blocks);
+    //     if(input->l)
+    //     {
+    //         get_permission(entry[i].st.st_mode,perm);
+    //         char*user=get_uid(uid_str,sizeof(uid_str),entry[i].st.st_uid);
+    //         char*group=get_gid(gid_str,sizeof(gid_str),entry[i].st.st_gid);
+    //         char*time=get_time(time_str,sizeof(time_str),entry[i].st.st_mtime);
+    //         printf("%s %ld %s %s %ld %s ",perm,entry[i].st.st_nlink,user,group,entry[i].st.st_size,time);
+    //     }
+    // }
+    print(entry,n,input);
     if(input->R)
     {
        for(int i=0;i<n;i++)
@@ -189,7 +248,6 @@ void list_file(char *path,Input *input)
         continue;
         char new_path[4096];
         snprintf(new_path,sizeof(new_path),"%s/%s",path,entry[i].file_name);
-        printf(" %s ",new_path);
         list_file(new_path,input);
        }  
     }
@@ -213,4 +271,3 @@ int main(int argc,char*argv[])
    }
    return 0;
 }
-//-R
